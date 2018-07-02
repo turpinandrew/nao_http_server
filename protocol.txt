@@ -1,0 +1,15 @@
+autoListen=On
+autoListen=Off
+
+move=Forward&speed=1.0  # speed in [-1,1]
+move=Back&speed=1.0
+move=Stop
+
+text=I will say this
+
+photo=0   # top camera, returns html with <img ...> tag
+photo=1   # bottom camera
+
+posture=SitRelax&speed=1.0  # If posture not exist, returns csv list of postures, speed in [0,1]
+                            # ['Crouch', 'LyingBack', 'LyingBelly', 'Sit', 'SitOnChair', 
+                            #  'SitRelax', 'Stand', 'StandInit', 'StandZero']
