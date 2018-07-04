@@ -8,12 +8,12 @@ Mon  2 Jul 2018 11:10:56 AEST
 from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 #import SocketServer
 import cgi
-
 import naoqi
+from math import pi
+import motion, almath
 
 class Handler(BaseHTTPRequestHandler):
     def __init__(self, request, client_address, server):
-        print("hi")
         BaseHTTPRequestHandler.__init__(self, request, client_address, server)
         #self.nao_ip = nao_ip
         #self.nao_port = nao_port
@@ -33,7 +33,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         self._set_headers()
-        
+
     def _get_speed(self, form):
         speed = 1.0
         if 'speed' in form:
@@ -42,25 +42,38 @@ class Handler(BaseHTTPRequestHandler):
             speed = 1.0
         return speed
 
+    def _get_angle(self, form):
+        angle = 0
+        if 'angle' in form:
+            angle = float(form['angle'].value)/180*pi
+        return angle
+
     def _handle_move(self, form):
         """Process the move command in form['move'].value.
-           Commands are "Forward", "Back", "Stop".
+           Commands are "Forward", "Back", "Stop", "Rest".
            Use speed = form['speed'].value if present and in [-1,1].
         """
 
         if not proxies['motion'].robotIsWakeUp():
             proxies['motion'].wakeUp()
 
-        proxies['motion'].moveInit()
+        if form['move'].value != "Rest":
+            proxies['motion'].moveInit()
 
         speed = self._get_speed(form)
+        angle = self._get_angle(form)
 
         if form['move'].value == "Forward":
             proxies['motion'].moveToward( speed, 0, 0)
         elif form['move'].value == "Back":
             proxies['motion'].moveToward(-speed, 0, 0)
+        elif form['move'].value == "Turn":
+            proxies['motion'].post.move(0, 0, angle)
         elif form['move'].value == "Stop":
             proxies['motion'].stopMove()
+        elif form['move'].value == "Rest":
+            proxies['posture'].goToPosture("Crouch", 0.5)
+            proxies['motion'].rest()
 
         self.response('{} {} m/s'.format(form['move'].value, speed))
 
@@ -79,9 +92,10 @@ class Handler(BaseHTTPRequestHandler):
             self.response('Set Autonomous Listening Off')
 
     def _handle_photo(self, form):
-        """Take a photo.
+        """Take a photo and put it on the NAO where it can 
+           be served as an image via HTTP.
         """
-        PATH = '/var/www/robotsgate/'
+        PATH = '/var/www/robotsgate/photo'
         FILE = 'camera.jpg'
 
         if 'photo' not in proxies:   # simulated NAO
@@ -95,16 +109,13 @@ class Handler(BaseHTTPRequestHandler):
 
         proxies['photo'].setPictureFormat('jpg')
         proxies['photo'].takePicture(PATH, FILE)
-    
-        self._set_headers("image/jpeg")
-        myfile = open("{}/{}".format(PATH, FILE), 'rb')
-        self.wfile.write(myfile.read())
-            
+        self.response('<html><body><img src="http://{}/photo/{}"></body></html>'.format(nao_ip, FILE))
+
     def _handle_posture(self, form):
         """Move to posture.
         """
         available = proxies['posture'].getPostureList()
-        print(available)
+        #print(available)
 
         if form['posture'].value not in available:
             self.response(','.join(available))
@@ -112,6 +123,50 @@ class Handler(BaseHTTPRequestHandler):
             speed = self._get_speed(form)
             proxies['posture'].goToPosture(form['posture'].value, speed)
             self.response('Changed posture: {}'.format(form['posture'].value))
+
+    def _handle_volume(self, form):
+        """Set volume. Assumes 'volume' in form.
+        """
+        level = int(form['volume'].value)
+        if level < 0 or level > 100:
+            level = 0
+        proxies['audio'].setOutputVolume(level)
+
+        self.response('Set volume: {}'.format(level))
+
+    def _handle_get(self, form):
+        """Get data about the bot.
+        """
+        if form['get'].value.lower() == 'battery':
+            p = proxies['battery'].getBatteryCharge()
+            self.response('Battery,{}'.format(p))
+
+    def _handle_hand(self, form):
+        """Move the hand/arm of the bot.
+        """
+        proxies['motion'].wakeUp()
+
+        if form['hand'].value.lower() == 'left':
+            name  = 'LArm'
+        else:
+            name  = 'RArm'
+        frame  = motion.FRAME_TORSO
+        useSensorValues  = True
+        currentTf = proxies['motion'].getTransform(name, frame, useSensorValues)
+
+        dx = dy = dz = 0
+        if 'dx' in form: dx = float(form['dx'].value)
+        if 'dy' in form: dy = float(form['dy'].value)
+        if 'dz' in form: dz = float(form['dz'].value)
+
+        targetTf  = almath.Transform(currentTf)
+        targetTf.r1_c4 += dx # x
+        targetTf.r2_c4 += dy # y
+        targetTf.r3_c4 += dz # z (I hope)
+
+        proxies['motion'].setTransform(name, frame, targetTf.toVector(), 0.5, almath.AXIS_MASK_VEL)
+
+        self.response('Moved {} arm: {} {} {}'.format(form['hand'].value, dx, dy, dz))
 
     def do_POST(self):
         form = cgi.FieldStorage(
@@ -127,12 +182,15 @@ class Handler(BaseHTTPRequestHandler):
             proxies['tts'].say(form["text"].value)
             self.response("Said: {}".format(form["text"].value))
 
+        if 'get'        in form: self._handle_get(form)
+        if 'volume'     in form: self._handle_volume(form)
+        if 'posture'    in form: self._handle_posture(form)
         if 'move'       in form: self._handle_move(form)
         if 'autoListen' in form: self._handle_autonomous(form)
         if 'photo'      in form: self._handle_photo(form)
-        if 'posture'    in form: self._handle_posture(form)
- 
-        
+        if 'hand'       in form: self._handle_hand(form)
+
+
 def run(server_class=HTTPServer, handler_class=Handler, port=8000):
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
@@ -154,9 +212,11 @@ if __name__ == "__main__":
         except RuntimeError as e:
             print(e)
 
+        proxies['audio'] = naoqi.ALProxy("ALAudioDevice", nao_ip, nao_port)
         proxies['tts'] = naoqi.ALProxy("ALTextToSpeech", nao_ip, nao_port)
         proxies['motion'] = naoqi.ALProxy("ALMotion", nao_ip, nao_port)
         proxies['posture'] = naoqi.ALProxy("ALRobotPosture", nao_ip, nao_port)
+        proxies['battery'] = naoqi.ALProxy("ALBattery", nao_ip, nao_port)
 
         run(port=port)
     else:

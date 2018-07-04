@@ -3,13 +3,24 @@ autoListen=Off
 
 move=Forward&speed=1.0  # speed in [-1,1]
 move=Back&speed=1.0
+move=Turn&angle=20      # <0 is turn right, >0 is turn left, angle in degrees
 move=Stop
+move=Rest
 
 text=I will say this
 
 photo=0   # top camera, returns html with <img ...> tag
-photo=1   # bottom camera
+photo=1   # bottom camera (note requires /var/www/robotsgate/photo with 777 perm on bot)
+
 
 posture=SitRelax&speed=1.0  # If posture not exist, returns csv list of postures, speed in [0,1]
                             # ['Crouch', 'LyingBack', 'LyingBelly', 'Sit', 'SitOnChair', 
                             #  'SitRelax', 'Stand', 'StandInit', 'StandZero']
+
+volume=0    # turn off sound   (integers in 0 to 100 allowed)
+volume=100  # turn volume to max
+
+get=battery  # returns the battery charge in percent [0..100]
+
+hand=left&dx=0&dy=0.1&dz=0   # left or right. +x is forward, +y is left, +z is up. 
+                             # distances in metres relative to the torso of the bot.
